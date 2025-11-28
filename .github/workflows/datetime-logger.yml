@@ -1,0 +1,144 @@
+name: Scheduled Datetime Logger
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # Every 5 minutes - triggers collect job
+    - cron: '0 * * * *'     # Every hour - triggers commit job
+  workflow_dispatch:
+    inputs:
+      job_to_run:
+        description: 'Which job to run'
+        required: true
+        default: 'collect'
+        type: choice
+        options:
+          - collect
+          - commit
+
+# Ensure only one workflow run executes at a time to prevent race conditions
+# between collect and commit jobs accessing the same artifact
+concurrency:
+  group: datetime-logger
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    # Schedule '*/5 * * * *' triggers at minute intervals (but not at :00), workflow_dispatch allows manual trigger
+    if: (github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_to_run == 'collect')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Download existing output artifact from previous runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find the latest artifact named output-artifact
+          ARTIFACT_ID=$(gh api repos/${{ github.repository }}/actions/artifacts \
+            --jq '.artifacts | map(select(.name == "output-artifact" and .expired == false)) | sort_by(.created_at) | last | .id // empty')
+          
+          if [ -n "$ARTIFACT_ID" ]; then
+            echo "Downloading artifact ID: $ARTIFACT_ID"
+            gh api repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > artifact.zip
+            if [ -s artifact.zip ]; then
+              unzip -o artifact.zip -d ./artifact
+              if [ -f ./artifact/output.txt ]; then
+                cp ./artifact/output.txt ./output.txt
+                echo "Restored output.txt from previous artifact"
+              fi
+            else
+              echo "Downloaded artifact is empty"
+            fi
+          else
+            echo "No previous artifact found"
+          fi
+          
+          # Ensure output.txt exists
+          touch output.txt
+
+      - name: Run Python script and append to output.txt
+        run: python print_datetime.py >> output.txt
+
+      - name: Upload output artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: output-artifact
+          path: output.txt
+          overwrite: true
+
+  commit:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+    # Schedule '0 * * * *' triggers at the top of each hour
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 * * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_to_run == 'commit')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download output artifact from previous runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find the latest artifact named output-artifact
+          ARTIFACT_ID=$(gh api repos/${{ github.repository }}/actions/artifacts \
+            --jq '.artifacts | map(select(.name == "output-artifact" and .expired == false)) | sort_by(.created_at) | last | .id // empty')
+          
+          if [ -n "$ARTIFACT_ID" ]; then
+            echo "Downloading artifact ID: $ARTIFACT_ID"
+            gh api repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > artifact.zip
+            if [ -s artifact.zip ]; then
+              unzip -o artifact.zip -d ./artifact
+            else
+              echo "Downloaded artifact is empty"
+              mkdir -p ./artifact
+            fi
+          else
+            echo "No artifact found"
+            mkdir -p ./artifact
+          fi
+
+      - name: Append output.txt to runs.txt
+        run: |
+          if [ -f ./artifact/output.txt ]; then
+            cat ./artifact/output.txt >> runs.txt
+            echo "Appended output.txt content to runs.txt"
+          else
+            echo "No output.txt found to append"
+          fi
+
+      - name: Commit and push runs.txt
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add runs.txt
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update runs.txt with collected datetime entries"
+            git push
+          fi
+
+      - name: Delete old artifacts to clear output
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Delete all output-artifact artifacts to start fresh
+          ARTIFACT_IDS=$(gh api repos/${{ github.repository }}/actions/artifacts \
+            --jq '.artifacts | map(select(.name == "output-artifact")) | .[].id')
+          
+          for ID in $ARTIFACT_IDS; do
+            echo "Deleting artifact ID: $ID"
+            gh api -X DELETE repos/${{ github.repository }}/actions/artifacts/$ID || true
+          done
+          echo "All output artifacts cleared"
