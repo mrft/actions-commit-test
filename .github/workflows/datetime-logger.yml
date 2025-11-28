@@ -15,6 +15,12 @@ on:
           - collect
           - commit
 
+# Ensure only one workflow run executes at a time to prevent race conditions
+# between collect and commit jobs accessing the same artifact
+concurrency:
+  group: datetime-logger
+  cancel-in-progress: false
+
 jobs:
   collect:
     runs-on: ubuntu-latest
