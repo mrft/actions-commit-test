@@ -33,10 +33,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install Python with uv
+        run: uv python install 3.x
 
       - name: Download existing output artifact from previous runs
         env:
@@ -66,7 +67,7 @@ jobs:
           touch output.txt
 
       - name: Run Python script and append to output.txt
-        run: python print_datetime.py >> output.txt
+        run: uv run print_datetime.py >> output.txt
 
       - name: Upload output artifact
         uses: actions/upload-artifact@v4
