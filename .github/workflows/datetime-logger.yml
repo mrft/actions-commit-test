@@ -18,6 +18,9 @@ on:
 jobs:
   collect:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
     # Schedule '*/5 * * * *' triggers at minute intervals (but not at :00), workflow_dispatch allows manual trigger
     if: (github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_to_run == 'collect')
     steps:
@@ -68,6 +71,9 @@ jobs:
 
   commit:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
     # Schedule '0 * * * *' triggers at the top of each hour
     if: (github.event_name == 'schedule' && github.event.schedule == '0 * * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_to_run == 'commit')
     steps:
