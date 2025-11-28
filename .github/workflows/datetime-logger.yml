@@ -37,7 +37,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install Python with uv
-        run: uv python install 3.x
+        run: uv python install 3.12
 
       - name: Download existing output artifact from previous runs
         env:
