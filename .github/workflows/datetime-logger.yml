@@ -18,7 +18,8 @@ on:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '*/5 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_to_run == 'collect')
+    # Schedule '*/5 * * * *' triggers at minute intervals (but not at :00), workflow_dispatch allows manual trigger
+    if: (github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_to_run == 'collect')
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -39,10 +40,14 @@ jobs:
           if [ -n "$ARTIFACT_ID" ]; then
             echo "Downloading artifact ID: $ARTIFACT_ID"
             gh api repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > artifact.zip
-            unzip -o artifact.zip -d ./artifact || true
-            if [ -f ./artifact/output.txt ]; then
-              cp ./artifact/output.txt ./output.txt
-              echo "Restored output.txt from previous artifact"
+            if [ -s artifact.zip ]; then
+              unzip -o artifact.zip -d ./artifact
+              if [ -f ./artifact/output.txt ]; then
+                cp ./artifact/output.txt ./output.txt
+                echo "Restored output.txt from previous artifact"
+              fi
+            else
+              echo "Downloaded artifact is empty"
             fi
           else
             echo "No previous artifact found"
@@ -63,7 +68,8 @@ jobs:
 
   commit:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 * * * *' || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_to_run == 'commit')
+    # Schedule '0 * * * *' triggers at the top of each hour
+    if: (github.event_name == 'schedule' && github.event.schedule == '0 * * * *') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job_to_run == 'commit')
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -79,7 +85,12 @@ jobs:
           if [ -n "$ARTIFACT_ID" ]; then
             echo "Downloading artifact ID: $ARTIFACT_ID"
             gh api repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip > artifact.zip
-            unzip -o artifact.zip -d ./artifact || true
+            if [ -s artifact.zip ]; then
+              unzip -o artifact.zip -d ./artifact
+            else
+              echo "Downloaded artifact is empty"
+              mkdir -p ./artifact
+            fi
           else
             echo "No artifact found"
             mkdir -p ./artifact
